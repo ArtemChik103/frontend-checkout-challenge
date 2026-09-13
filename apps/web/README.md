@@ -1,7 +1,14 @@
-# Ваш фронтенд
+# @checkout/web
 
-Добавьте сюда приложение на React и TypeScript. Назовите workspace `@checkout/web`, добавьте его зависимости и команды запуска в своём решении.
+Фронтенд оформления заказа для InStat Digital Checkout Challenge.
 
-Условия: [задание](../../docs/ASSIGNMENT.md). API: [интеграция](../../docs/INTEGRATION.md).
+- **Стек**: React 19, TypeScript 5.9, Vite 6.
+- **Подробная документация, архитектура и разбор производительности**: смотрите в корневом [README.md](../../README.md).
 
-[Критерии оценки](../../docs/EVALUATION.md).
+## Команды запуска из этой папки
+
+```sh
+pnpm run dev      # Запуск Vite dev-сервера (порт 5173)
+pnpm run build    # Проверка типов tsc и сборка бандла
+pnpm run preview  # Превью собранного бандла
+```
