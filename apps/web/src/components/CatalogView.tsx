@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { ProductSchema, CartItemSchema } from '@checkout/contracts';
 import type { Static } from '@sinclair/typebox';
 import { formatMoney } from '../lib/format.js';
@@ -20,17 +20,6 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
   onAddToCart,
   isLoading,
 }) => {
-  const [addingId, setAddingId] = useState<string | null>(null);
-
-  const handleAdd = async (product: Product) => {
-    setAddingId(product.id);
-    try {
-      await onAddToCart(product);
-    } finally {
-      setAddingId(null);
-    }
-  };
-
   return (
     <section aria-labelledby="catalog-title">
       <div className="catalog-header">
@@ -46,7 +35,6 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
           const currentQty = inCartItem?.quantity || 0;
           const isOutOfStock = product.stock <= 0;
           const isLimitReached = currentQty >= product.stock;
-          const isAdding = addingId === product.id;
 
           return (
             <article key={product.id} className="product-card">
@@ -65,8 +53,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({
                   size="sm"
                   variant={isLimitReached ? 'secondary' : 'primary'}
                   disabled={isOutOfStock || isLimitReached || isLoading}
-                  isLoading={isAdding}
-                  onClick={() => handleAdd(product)}
+                  onClick={() => onAddToCart(product)}
                 >
                   {isOutOfStock
                     ? 'Распродано'

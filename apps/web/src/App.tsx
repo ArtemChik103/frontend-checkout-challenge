@@ -108,35 +108,113 @@ export const App: React.FC = () => {
     return res;
   }, []);
 
-  // Добавление товара в корзину (абсолютное количество: PUT /api/cart/items/{id})
+  // Добавление товара в корзину с оптимистичным обновлением (0 мс задержка UI)
   const handleAddToCart = async (product: Product) => {
+    if (!cart) return;
     const existing = cartSummary.itemMap.get(product.id);
-    const newQty = (existing?.quantity || 0) + 1;
+    const currentQty = existing?.quantity || 0;
+    if (currentQty >= product.stock) return;
+
+    const newQty = currentQty + 1;
+    const prevCart = cart;
+
+    const optimisticItems = existing
+      ? cart.items.map((item) =>
+          item.productId === product.id
+            ? { ...item, quantity: newQty, lineTotal: newQty * product.price }
+            : item,
+        )
+      : [
+          ...cart.items,
+          {
+            productId: product.id,
+            title: product.title,
+            unitPrice: product.price,
+            quantity: 1,
+            lineTotal: product.price,
+          },
+        ];
+
+    setCart({
+      ...cart,
+      items: optimisticItems,
+      quantity: cart.quantity + 1,
+      subtotal: cart.subtotal + product.price,
+    });
 
     try {
       await api.put(`/api/cart/items/${product.id}`, { quantity: newQty });
       await refreshCart();
     } catch (err) {
+      setCart(prevCart);
       setGlobalError(err as AppError);
     }
   };
 
-  // Изменение количества позиции
+  // Изменение количества позиции с оптимистичным обновлением
   const handleUpdateQuantity = async (productId: string, quantity: number) => {
-    try {
-      await api.put(`/api/cart/items/${productId}`, { quantity });
-      await refreshCart();
-    } catch (err) {
-      setGlobalError(err as AppError);
+    if (!cart) return;
+    const existing = cartSummary.itemMap.get(productId);
+    if (!existing) return;
+
+    const prevCart = cart;
+    const diffQty = quantity - existing.quantity;
+    const diffPrice = diffQty * existing.unitPrice;
+
+    if (quantity <= 0) {
+      setCart({
+        ...cart,
+        items: cart.items.filter((item) => item.productId !== productId),
+        quantity: cart.quantity - existing.quantity,
+        subtotal: cart.subtotal - existing.lineTotal,
+      });
+      try {
+        await api.delete(`/api/cart/items/${productId}`);
+        await refreshCart();
+      } catch (err) {
+        setCart(prevCart);
+        setGlobalError(err as AppError);
+      }
+    } else {
+      setCart({
+        ...cart,
+        items: cart.items.map((item) =>
+          item.productId === productId
+            ? { ...item, quantity, lineTotal: quantity * existing.unitPrice }
+            : item,
+        ),
+        quantity: cart.quantity + diffQty,
+        subtotal: cart.subtotal + diffPrice,
+      });
+      try {
+        await api.put(`/api/cart/items/${productId}`, { quantity });
+        await refreshCart();
+      } catch (err) {
+        setCart(prevCart);
+        setGlobalError(err as AppError);
+      }
     }
   };
 
-  // Удаление позиции
+  // Удаление позиции с оптимистичным обновлением
   const handleRemoveItem = async (productId: string) => {
+    if (!cart) return;
+    const existing = cartSummary.itemMap.get(productId);
+    if (!existing) return;
+
+    const prevCart = cart;
+    setCart({
+      ...cart,
+      items: cart.items.filter((item) => item.productId !== productId),
+      quantity: cart.quantity - existing.quantity,
+      subtotal: cart.subtotal - existing.lineTotal,
+    });
+
     try {
       await api.delete(`/api/cart/items/${productId}`);
       await refreshCart();
     } catch (err) {
+      setCart(prevCart);
       setGlobalError(err as AppError);
     }
   };

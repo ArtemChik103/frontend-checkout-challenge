@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   CartSchema,
   CheckoutOptionsSchema,
@@ -71,6 +71,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [quote, setQuote] = useState<Quote | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<AppError | null>(null);
+  const quoteAbortRef = useRef<AbortController | null>(null);
 
   // Ошибки формы и отправка заказа
   const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
@@ -86,28 +87,48 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     localStorage.setItem('checkout_address_draft', JSON.stringify(address));
   }, [address]);
 
-  // Запрос расчета Quote
-  const fetchQuote = useCallback(
-    async (currentCartVersion: number) => {
+  useEffect(() => {
+    return () => {
+      if (quoteAbortRef.current) {
+        quoteAbortRef.current.abort();
+      }
+    };
+  }, []);
+
+  // Запрос расчета Quote с защитой от гонок (AbortController)
+  const requestQuote = useCallback(
+    async (
+      currentCartVersion: number,
+      method: 'pickup' | 'courier',
+      pointId: string,
+      addr: AddressFormData,
+    ) => {
+      if (quoteAbortRef.current) {
+        quoteAbortRef.current.abort();
+      }
+      const abortCtrl = new AbortController();
+      quoteAbortRef.current = abortCtrl;
+
       setIsQuoting(true);
       setQuoteError(null);
 
       const deliveryPayload =
-        deliveryMethod === 'pickup'
-          ? { method: 'pickup' as const, pickupPointId }
+        method === 'pickup'
+          ? { method: 'pickup' as const, pickupPointId: pointId }
           : {
               method: 'courier' as const,
               address: {
-                city: address.city.trim(),
-                street: address.street.trim(),
-                house: address.house.trim(),
-                apartment: address.apartment.trim() || undefined,
+                city: addr.city.trim(),
+                street: addr.street.trim(),
+                house: addr.house.trim(),
+                apartment: addr.apartment.trim() || undefined,
               },
             };
 
       try {
         const res = await api.request<Quote>('/api/quotes', {
           method: 'POST',
+          signal: abortCtrl.signal,
           body: {
             cartVersion: currentCartVersion,
             delivery: deliveryPayload,
@@ -116,6 +137,8 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
         setQuote(res.data);
       } catch (err) {
         const appErr = err as AppError;
+        if (appErr.kind === 'abort') return;
+
         // Если конфликт версии корзины или истек расчет — обновляем корзину
         if (appErr.code === 'CART_VERSION_CONFLICT' || appErr.code === 'QUOTE_EXPIRED') {
           try {
@@ -139,18 +162,23 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
         setIsQuoting(false);
       }
     },
-    [deliveryMethod, pickupPointId, address, onRefreshCart],
+    [onRefreshCart],
   );
 
-  // Пересчет при смене метода доставки, ПВЗ или версии корзины
+  // Пересчет при смене метода доставки, ПВЗ или версии корзины (ввод адреса дебаунсится на 400 мс)
   useEffect(() => {
     if (deliveryMethod === 'courier') {
       const addrErrors = validateCourierAddress(address);
       if (Object.keys(addrErrors).length > 0) {
         return; // Не делаем запрос с неполным адресом
       }
+      const timer = setTimeout(() => {
+        requestQuote(cart.version, deliveryMethod, pickupPointId, address);
+      }, 400);
+      return () => clearTimeout(timer);
+    } else {
+      requestQuote(cart.version, deliveryMethod, pickupPointId, address);
     }
-    fetchQuote(cart.version);
   }, [
     cart.version,
     deliveryMethod,
@@ -159,7 +187,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
     address.street,
     address.house,
     address.apartment,
-    fetchQuote,
+    requestQuote,
   ]);
 
   // Отправка заказа
@@ -212,7 +240,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
       // Если конфликт версии или расчет устарел — запрашиваем свежий расчет
       if (appErr.code === 'CART_VERSION_CONFLICT' || appErr.code === 'QUOTE_EXPIRED') {
         const freshCart = await onRefreshCart();
-        await fetchQuote(freshCart.version);
+        await requestQuote(freshCart.version, deliveryMethod, pickupPointId, address);
       }
     } finally {
       setIsSubmitting(false);
@@ -242,7 +270,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           onRetry={
             quote
               ? () => handleSubmitOrder({ preventDefault: () => {} } as any)
-              : () => fetchQuote(cart.version)
+              : () => requestQuote(cart.version, deliveryMethod, pickupPointId, address)
           }
           retryLabel="Повторить отправку"
         />
@@ -253,7 +281,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
           type="warning"
           title="Ошибка расчета стоимости"
           message={quoteError.message}
-          onRetry={() => fetchQuote(cart.version)}
+          onRetry={() => requestQuote(cart.version, deliveryMethod, pickupPointId, address)}
           retryLabel="Обновить расчет"
         />
       )}
@@ -440,18 +468,18 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
             <div className="summary-row">
               <span>Доставка</span>
               <span>
-                {isQuoting
-                  ? 'Расчет...'
-                  : quote
-                    ? quote.shipping === 0
-                      ? 'Бесплатно'
-                      : formatMoney(quote.shipping)
+                {quote
+                  ? quote.shipping === 0
+                    ? 'Бесплатно'
+                    : formatMoney(quote.shipping)
+                  : isQuoting
+                    ? 'Расчет...'
                     : '—'}
               </span>
             </div>
             <div className="summary-row total">
               <span>Итого к оплате</span>
-              <span>{isQuoting ? '...' : formatMoney(quote?.total ?? cart.subtotal)}</span>
+              <span>{formatMoney(quote?.total ?? cart.subtotal)}</span>
             </div>
 
             <div
@@ -467,8 +495,8 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
                 variant="primary"
                 size="lg"
                 className="full-width"
-                isLoading={isSubmitting || isQuoting}
-                disabled={isSubmitting || isQuoting || !quote}
+                isLoading={isSubmitting}
+                disabled={isSubmitting || !quote}
               >
                 {paymentMethod === 'card' ? 'Перейти к оплате' : 'Подтвердить заказ'}
               </Button>

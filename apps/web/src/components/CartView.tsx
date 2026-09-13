@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { CartSchema, ProductSchema } from '@checkout/contracts';
 import type { Static } from '@sinclair/typebox';
 import { formatMoney } from '../lib/format.js';
@@ -27,31 +27,19 @@ export const CartView: React.FC<CartViewProps> = ({
   onContinueShopping,
   isLoading,
 }) => {
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-
   const items = cart?.items || [];
   const isEmpty = items.length === 0;
 
-  const handleQtyChange = async (productId: string, newQty: number) => {
-    setUpdatingId(productId);
-    try {
-      if (newQty <= 0) {
-        await onRemoveItem(productId);
-      } else {
-        await onUpdateQuantity(productId, newQty);
-      }
-    } finally {
-      setUpdatingId(null);
+  const handleQtyChange = (productId: string, newQty: number) => {
+    if (newQty <= 0) {
+      onRemoveItem(productId);
+    } else {
+      onUpdateQuantity(productId, newQty);
     }
   };
 
-  const handleRemove = async (productId: string) => {
-    setUpdatingId(productId);
-    try {
-      await onRemoveItem(productId);
-    } finally {
-      setUpdatingId(null);
-    }
+  const handleRemove = (productId: string) => {
+    onRemoveItem(productId);
   };
 
   // Проверка превышения остатков в корзине
@@ -101,7 +89,6 @@ export const CartView: React.FC<CartViewProps> = ({
               {items.map((item) => {
                 const prod = productsMap.get(item.productId);
                 const maxStock = prod?.stock ?? 99;
-                const isItemUpdating = updatingId === item.productId;
                 const isOverStock = item.quantity > maxStock;
 
                 return (
@@ -139,7 +126,7 @@ export const CartView: React.FC<CartViewProps> = ({
                         <button
                           type="button"
                           className="qty-btn"
-                          disabled={isLoading || isItemUpdating}
+                          disabled={isLoading || item.quantity <= 1}
                           onClick={() => handleQtyChange(item.productId, item.quantity - 1)}
                           aria-label="Уменьшить на 1"
                         >
@@ -151,7 +138,7 @@ export const CartView: React.FC<CartViewProps> = ({
                         <button
                           type="button"
                           className="qty-btn"
-                          disabled={isLoading || isItemUpdating || item.quantity >= maxStock}
+                          disabled={isLoading || item.quantity >= maxStock}
                           onClick={() => handleQtyChange(item.productId, item.quantity + 1)}
                           aria-label="Увеличить на 1"
                         >
@@ -165,7 +152,7 @@ export const CartView: React.FC<CartViewProps> = ({
                         type="button"
                         className="delete-btn"
                         onClick={() => handleRemove(item.productId)}
-                        disabled={isLoading || isItemUpdating}
+                        disabled={isLoading}
                         title="Удалить позицию"
                         aria-label={`Удалить ${item.title} из корзины`}
                       >
