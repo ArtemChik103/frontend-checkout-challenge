@@ -1,5 +1,9 @@
 # Решение тестового задания: Интернет-магазин и оформление заказа
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel%20Online-black?style=for-the-badge&logo=vercel&logoColor=white)](https://frontend-checkout-challenge.vercel.app)
+
+**Онлайн-демонстрация (Vercel):** [https://frontend-checkout-challenge.vercel.app](https://frontend-checkout-challenge.vercel.app)
+
 Фронтенд-приложение на React 19, TypeScript и Vite, расположенное в `apps/web` (`@checkout/web`), полностью интегрированное с локальным REST API магазина.
 
 Репозиторий решения: [https://github.com/ArtemChik103/frontend-checkout-challenge](https://github.com/ArtemChik103/frontend-checkout-challenge)
