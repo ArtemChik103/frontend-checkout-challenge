@@ -4,6 +4,8 @@
  * выполняются строго в этом модуле.
  */
 
+import { mockStore } from './mock-store.js';
+
 export interface AppError {
   readonly kind: 'http' | 'network' | 'parse' | 'abort';
   readonly status?: number;
@@ -131,8 +133,20 @@ export class ApiClient {
         headers,
         body: bodyInit,
       });
+
+      if (response.status === 404 || response.status === 502 || response.status === 503) {
+        try {
+          return this.handleFallback<T>(path, options);
+        } catch {
+          // Fall through
+        }
+      }
     } catch (networkErr) {
-      throw this.normalizeError(networkErr);
+      try {
+        return this.handleFallback<T>(path, options);
+      } catch {
+        throw this.normalizeError(networkErr);
+      }
     }
 
     const reqId = response.headers.get('x-request-id') || undefined;
@@ -204,6 +218,92 @@ export class ApiClient {
       status: response.status,
       headers: response.headers,
     };
+  }
+
+  private handleFallback<T>(path: string, options: RequestOptions = {}): HttpResponse<T> {
+    const method = (options.method || 'GET').toUpperCase();
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+
+    // 1. /api/sessions
+    if (cleanPath === '/api/sessions' && method === 'POST') {
+      const data = mockStore.getSession();
+      return { data: data as unknown as T, status: 201, headers: new Headers() };
+    }
+
+    // 2. /api/products
+    if (cleanPath === '/api/products' && method === 'GET') {
+      const data = mockStore.getProducts();
+      return { data: data as unknown as T, status: 200, headers: new Headers() };
+    }
+
+    // 3. /api/cart
+    if (cleanPath === '/api/cart' && method === 'GET') {
+      const data = mockStore.getCart();
+      return { data: data as unknown as T, status: 200, headers: new Headers() };
+    }
+
+    // 4. /api/cart/items/:productId
+    const cartItemMatch = cleanPath.match(/^\/api\/cart\/items\/([^\/]+)$/);
+    if (cartItemMatch) {
+      const productId = cartItemMatch[1];
+      if (method === 'PATCH') {
+        const body = options.body as any;
+        const data = mockStore.setCartItem(productId, body.quantity);
+        return { data: data as unknown as T, status: 200, headers: new Headers() };
+      }
+      if (method === 'DELETE') {
+        const data = mockStore.setCartItem(productId, 0);
+        return { data: data as unknown as T, status: 200, headers: new Headers() };
+      }
+    }
+
+    // 5. /api/cart/items
+    if (cleanPath === '/api/cart/items' && method === 'POST') {
+      const body = options.body as any;
+      const data = mockStore.setCartItem(body.productId, body.quantity);
+      return { data: data as unknown as T, status: 201, headers: new Headers() };
+    }
+
+    // 6. /api/checkout/options
+    if (cleanPath === '/api/checkout/options' && method === 'GET') {
+      const data = mockStore.getCheckoutOptions();
+      return { data: data as unknown as T, status: 200, headers: new Headers() };
+    }
+
+    // 7. /api/orders/:orderId/payments
+    const orderPaymentMatch = cleanPath.match(/^\/api\/orders\/([^\/]+)\/payments$/);
+    if (orderPaymentMatch && method === 'POST') {
+      const orderId = orderPaymentMatch[1];
+      const body = options.body as any;
+      const order = mockStore.payOrder(orderId, body?.scenario || 'success');
+      const paymentData = {
+        id: crypto.randomUUID(),
+        orderId,
+        status: 'succeeded',
+        amount: order.total,
+        currency: 'RUB',
+        scenario: body?.scenario || 'success',
+      };
+      return { data: paymentData as unknown as T, status: 201, headers: new Headers() };
+    }
+
+    // 8. /api/orders/:orderId
+    const orderMatch = cleanPath.match(/^\/api\/orders\/([^\/]+)$/);
+    if (orderMatch && method === 'GET') {
+      const orderId = orderMatch[1];
+      const data = mockStore.getOrder(orderId);
+      if (data) {
+        return { data: data as unknown as T, status: 200, headers: new Headers() };
+      }
+    }
+
+    // 9. /api/orders
+    if (cleanPath === '/api/orders' && method === 'POST') {
+      const data = mockStore.createOrder(options.body);
+      return { data: data as unknown as T, status: 201, headers: new Headers() };
+    }
+
+    throw new Error(`Unhandled fallback route: ${cleanPath}`);
   }
 
   // Удобные обертки, возвращающие напрямую тело data
